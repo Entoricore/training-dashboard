@@ -937,21 +937,21 @@ function renderSleep() {
   const hours = G.map(d => { const a = ['deep', 'rem', 'light'].reduce((s, k) => s + (d[k] || 0), 0); return a ? a / 60 : null; });
   const small = '600 10.5px Barlow, system-ui, sans-serif';
   if (view('sleepView') === 'stages') {
-    document.getElementById('sleepSub').textContent = "Each night split into deep, REM, light and awake. Number above each bar = that night's sleep score (shown when there's room; hover any bar for it).";
+    document.getElementById('sleepSub').textContent = "Each night split into deep, REM, light and awake. Number above each bar = hours asleep (shown when there's room; hover any bar for it).";
     document.getElementById('stageLegend').innerHTML = legendHTML(STAGES.map(([, n, c]) => [n, c]));
     catChart('stages', { type: 'bar', data: { labels, datasets: STAGES.map(([k, n, c]) => ({ label: n, data: G.map(d => d[k] != null ? r1(d[k] / 60) : null), backgroundColor: c, borderColor: C.surface, borderWidth: { top: 1 }, borderSkipped: 'bottom' })) },
       options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, layout: { padding: { top: 16 } },
         scales: { x: { ...catAxis, stacked: true, ticks: { ...catAxis.ticks, maxTicksLimit: 10 } }, y: { ...valAxis({ min: 0, ticks: { callback: h => h + 'h', padding: 6 } }), stacked: true } },
-        plugins: { legend: { display: false }, totals: { show: true, labels: G.map(d => d.sleep ?? ''), font: small },
+        plugins: { legend: { display: false }, totals: { show: true, labels: hours.map(h => h ? h.toFixed(1) + 'h' : ''), font: small },
           tooltip: { ...tooltipStyle, callbacks: { title: i => 'Night before ' + i[0].label, label: it => `${it.dataset.label}: ${fmtMin(it.raw * 60)}`,
             footer: it => [`Asleep: ${fmtMin(it.filter(i => i.dataset.label !== 'Awake').reduce((s, i) => s + i.raw * 60, 0))}`, `Sleep score: ${G[it[0].dataIndex].sleep ?? '–'}`] } } } } });
   } else {
-    document.getElementById('sleepSub').textContent = "Garmin sleep score each night, coloured by Garmin's rating. Number above each bar = hours asleep (shown when there's room; hover any bar for it).";
+    document.getElementById('sleepSub').textContent = "Garmin sleep score each night, coloured by Garmin's rating. Number above each bar = that night's sleep score (shown when there's room; hover any bar for it).";
     document.getElementById('stageLegend').innerHTML = legendHTML(SCORE_BANDS.map(([lo, n, c], i) => [`${n} (${i ? lo + '–' + (SCORE_BANDS[i - 1][0] - 1) : '90+'})`, c]).reverse().reverse());
     catChart('stages', { type: 'bar', data: { labels, datasets: [{ label: 'Sleep score', data: G.map(d => d.sleep), backgroundColor: G.map(d => d.sleep != null ? band4(d.sleep)[2] : C.muted), borderRadius: 3, borderSkipped: 'bottom' }] },
       options: { maintainAspectRatio: false, layout: { padding: { top: 16 } },
         scales: { x: { ...catAxis, ticks: { ...catAxis.ticks, maxTicksLimit: 10 } }, y: valAxis({ min: 0, max: 100, ticks: { stepSize: 20, padding: 6 } }) },
-        plugins: { legend: { display: false }, totals: { show: true, labels: hours.map(h => h ? h.toFixed(1) + 'h' : ''), font: small },
+        plugins: { legend: { display: false }, totals: { show: true, labels: G.map(d => d.sleep ?? ''), font: small },
           tooltip: { ...tooltipStyle, callbacks: { title: i => 'Night before ' + i[0].label, label: it => `Sleep score ${it.raw} (${band4(it.raw)[1]})`, footer: it => `Asleep: ${hours[it[0].dataIndex] ? fmtMin(hours[it[0].dataIndex] * 60) : '–'}` } } } } });
   }
 

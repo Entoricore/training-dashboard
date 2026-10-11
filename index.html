@@ -507,39 +507,57 @@ function table(el, head, rows, numCols = [], rowAttr) {
 const IND = { 2: ['▲▲', 'good', 'very good'], 1: ['▲', 'good', 'good'], 0: ['●', 'neutral', 'neutral'], [-1]: ['▼', 'bad', 'below par'], [-2]: ['▼▼', 'bad', 'poor'] };
 const band = (v, [a, b, c, d]) => v == null ? null : v >= a ? 2 : v >= b ? 1 : v > c ? 0 : v > d ? -1 : -2;
 function renderTiles() {
-  const t = D.tiles, G = D.garmin, g = G[G.length - 1] || {};
-  const d = (a, b) => (a == null || b == null) ? '' : `${a - b > 0 ? '▲' : a - b < 0 ? '▼' : '±'} ${Math.abs(r1(a - b))} vs 28-day avg`;
-  const last4 = D.acts.filter(a => ts(a.date) > today - 28 * DAY);
-  const mins = last4.reduce((s, a) => s + (a.min || 0), 0);
-  const lifts4 = last4.filter(a => a.type === 'Lift').length;
-  // Training time: daily rate vs the previous 4 weeks (only the days we have data for).
-  const prevStart = today - 56 * DAY, prevEnd = today - 28 * DAY;
-  const covered = Math.max(0, Math.min(28, (prevEnd - Math.max(prevStart, ts(firstDate))) / DAY));
-  const prevMins = D.acts.filter(a => ts(a.date) > prevStart && ts(a.date) <= prevEnd).reduce((s, a) => s + (a.min || 0), 0);
-  const timeChange = covered >= 14 && prevMins ? ((mins / 28) / (prevMins / covered) - 1) * 100 : null;
-  const S = D.lifts.strength, sLast = S[S.length - 1];
-  const sPrev = [...S].reverse().find(s => ts(s.date) <= today - 28 * DAY);
-  const sDiff = sLast && sPrev ? sLast.index - sPrev.index : null;
+  // Every tile follows the range: the selected period vs the same-length period before it.
+  const G = D.garmin, g = G[G.length - 1] || {};
+  const span = Math.round((today - ts(firstDate)) / DAY) + 1;
+  const N = range ? Math.min(range, span) : span, full = !!range && N === range; // a range longer than the data acts like All
+  const NAME = { 7: '1 week', 14: '2 weeks', 28: '4 weeks', 91: '3 months' };
+  const per = full ? NAME[range] || `${range} days` : 'all time';
+  const prevTxt = full ? `previous ${per}` : '';
+  const from = today - N * DAY, prevFrom = from - N * DAY;
+  const inWin = (d, lo, hi) => ts(d) > lo && ts(d) <= hi;
+  const cur = D.acts.filter(a => inWin(a.date, from, today));
+  const mins = cur.reduce((s, a) => s + (a.min || 0), 0);
+  const lifts = cur.filter(a => a.type === 'Lift').length, planned = Math.round(N * 3 / 7);
+  // Training time: daily rate vs the previous period (only the days we have data for).
+  const covered = Math.max(0, Math.min(N, (from - Math.max(prevFrom, ts(firstDate))) / DAY));
+  const prevMins = D.acts.filter(a => inWin(a.date, prevFrom, from)).reduce((s, a) => s + (a.min || 0), 0);
+  const timeChange = full && covered >= N / 2 && prevMins ? ((mins / N) / (prevMins / covered) - 1) * 100 : null;
+  // Strength: each lift's latest e1RM vs its last e1RM before the range (or its first, for All),
+  // ignoring sessions before an equipment reset; median across lifts so the workout letter doesn't matter.
+  const chg = Object.entries(D.lifts.series).map(([ex, pts]) => {
+    const resets = [...(D.lifts.markers[ex] || []), ...D.lifts.global].map(m => m[0]);
+    const since = resets.length ? resets.sort().at(-1) : '';
+    const P = pts.filter(p => p.e1rm && p.date >= since);
+    const last = P.at(-1), base = full ? [...P].reverse().find(p => ts(p.date) <= from) : P[0];
+    return last && base && last !== base && ts(last.date) > from ? (last.e1rm / base.e1rm - 1) * 100 : null;
+  }).filter(v => v != null).sort((a, b) => a - b);
+  const sDiff = chg.length ? (chg.length % 2 ? chg[(chg.length - 1) / 2] : (chg[chg.length / 2 - 1] + chg[chg.length / 2]) / 2) : null;
   const STATUS = { Peaking: 2, Productive: 2, Maintaining: 0, Recovery: 0, Unproductive: -1, Detraining: -1, Overreaching: -2, Strained: -2 };
-  const vo2Prev = (G.find(x => ts(x.date) >= today - 28 * DAY) || {}).vo2;
-  const hrvPct = t.hrv7 != null && t.hrv28 ? (t.hrv7 - t.hrv28) / t.hrv28 * 100 : null;
+  const vo2Prev = full ? ([...G].reverse().find(x => x.vo2 != null && ts(x.date) <= from) || {}).vo2 : (G.find(x => x.vo2 != null) || {}).vo2;
+  const sinceTxt = full ? `vs ${per} ago` : 'since start';
+  const avgIn = (k, lo, hi) => { const v = G.filter(x => x[k] != null && inWin(x.date, lo, hi)).map(x => x[k]); return v.length ? r1(v.reduce((s, x) => s + x, 0) / v.length) : null; };
+  const rec = k => { const a = avgIn(k, from, today), b = full ? avgIn(k, prevFrom, from) : null; return [a, b]; };
+  const [hrv, hrvP] = rec('hrv'), [rhr, rhrP] = rec('rhr'), [slp, slpP] = rec('sleep');
+  const d = (a, b) => (a == null || b == null) ? `Average, ${per}` : `${a - b > 0 ? '▲' : a - b < 0 ? '▼' : '±'} ${Math.abs(r1(a - b))} vs ${prevTxt}`;
+  const hrvPct = hrv != null && hrvP ? (hrv - hrvP) / hrvP * 100 : null;
   const tiles = [
-    ['Sessions, last 4 weeks', last4.length, TYPES.map(ty => `${last4.filter(a => a.type === ty).length} ${ty.toLowerCase()}s`).join(' · '),
-      band(lifts4 / 12 * 100, [100, 90, 75, 60]), `Lifts done vs the 12 planned in 4 weeks (${lifts4}/12). ▲▲ ≥100% · ▲ ≥90% · ● ≥75% · ▼ ≥60% · ▼▼ below.`],
-    ['Training time per week', fmtMin(mins / 4), timeChange == null ? 'Average, last 4 weeks' : `${timeChange >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(timeChange))}% vs previous 4 weeks`,
-      timeChange == null ? 0 : band(timeChange, [25, 10, -10, -25]), timeChange == null ? 'Not enough history yet for a comparison.' : 'Daily training time vs the previous 4 weeks. ▲▲ ≥+25% · ▲ ≥+10% · ● within ±10% · ▼ ≥−25% · ▼▼ below.'],
-    ['Strength index', sLast ? sLast.index : '–', sDiff != null ? `${sDiff >= 0 ? '▲' : '▼'} ${Math.abs(r1(sDiff))} vs 4 weeks ago` : 'Latest session',
-      sDiff == null ? 0 : band(sDiff, [5, 1, -1, -5]), 'Change in strength index over 4 weeks. ▲▲ ≥+5 · ▲ ≥+1 · ● within ±1 · ▼ ≥−5 · ▼▼ below.'],
+    [`Sessions, ${full ? 'last ' + per : 'all time'}`, cur.length, TYPES.map(ty => `${cur.filter(a => a.type === ty).length} ${ty.toLowerCase()}s`).join(' · '),
+      band(lifts / planned * 100, [100, 90, 75, 60]), `Lifts done vs the ${planned} planned (3 a week) in this range (${lifts}/${planned}). ▲▲ ≥100% · ▲ ≥90% · ● ≥75% · ▼ ≥60% · ▼▼ below.`],
+    ['Training time per week', fmtMin(mins / (N / 7)), timeChange == null ? `Average, ${per}` : `${timeChange >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(timeChange))}% vs ${prevTxt}`,
+      timeChange == null ? 0 : band(timeChange, [25, 10, -10, -25]), timeChange == null ? 'No comparison for this range.' : 'Daily training time vs the previous period of the same length. ▲▲ ≥+25% · ▲ ≥+10% · ● within ±10% · ▼ ≥−25% · ▼▼ below.'],
+    ['Strength change', sDiff == null ? '–' : `${sDiff >= 0 ? '+' : '−'}${Math.abs(r1(sDiff))}%`, sDiff == null ? 'No lifts to compare' : `Median of ${chg.length} lifts, ${full ? `vs ${per} ago` : 'since start'}`,
+      sDiff == null ? 0 : band(sDiff, [5, 1, -1, -5]), 'Each lift\'s latest estimated 1RM vs where it was at the start of the range (equipment resets respected); median across lifts done in the range. ▲▲ ≥+5% · ▲ ≥+1% · ● within ±1% · ▼ ≥−5% · ▼▼ below.'],
     ['Training status', g.status || '–', g.acwr != null ? `Load ratio ${g.acwr} (acute ÷ chronic)` : '',
-      STATUS[g.status] ?? 0, 'Garmin training status. ▲▲ Productive/Peaking · ● Maintaining/Recovery · ▼ Unproductive/Detraining · ▼▼ Overreaching/Strained.'],
-    ['HRV, 7-day avg', t.hrv7 ?? '–', d(t.hrv7, t.hrv28),
-      band(hrvPct, [10, 4, -4, -10]), '7-day HRV vs your 28-day average. ▲▲ ≥+10% · ▲ ≥+4% · ● within ±4% · ▼ ≥−10% · ▼▼ below. (A spike while ill is not good news.)'],
-    ['Resting HR, 7-day avg', t.rhr7 ?? '–', d(t.rhr7, t.rhr28),
-      t.rhr7 == null ? 0 : band(-(t.rhr7 - t.rhr28), [3, 1.5, -1.5, -3]), 'Lower is better. ▲▲ ≥3 bpm below your 28-day avg · ▲ ≥1.5 below · ● within ±1.5 · ▼ up to 3 above · ▼▼ more.'],
-    ['Sleep score, 7-day avg', t.sleep7 ?? '–', d(t.sleep7, t.sleep28),
-      t.sleep7 == null ? 0 : band(t.sleep7 - t.sleep28, [5, 2, -2, -5]), '7-day sleep score vs 28-day average. ▲▲ ≥+5 · ▲ ≥+2 · ● within ±2 · ▼ ≥−5 · ▼▼ below.'],
-    ['VO2max', g.vo2 ?? '–', vo2Prev != null && g.vo2 != null ? `${g.vo2 - vo2Prev >= 0 ? '▲' : '▼'} ${Math.abs(r1(g.vo2 - vo2Prev))} vs 4 weeks ago` : 'Garmin estimate',
-      vo2Prev == null || g.vo2 == null ? 0 : band(g.vo2 - vo2Prev, [1, 0.3, -0.3, -1]), 'Change over 4 weeks. ▲▲ ≥+1 · ▲ ≥+0.3 · ● within ±0.3 · ▼ ≥−1 · ▼▼ below.'],
+      STATUS[g.status] ?? 0, 'Garmin training status (today; not affected by the range). ▲▲ Productive/Peaking · ● Maintaining/Recovery · ▼ Unproductive/Detraining · ▼▼ Overreaching/Strained.'],
+    [`HRV, ${per} avg`, hrv ?? '–', d(hrv, hrvP),
+      band(hrvPct, [10, 4, -4, -10]), 'Average HRV vs the previous period of the same length. ▲▲ ≥+10% · ▲ ≥+4% · ● within ±4% · ▼ ≥−10% · ▼▼ below. (A spike while ill is not good news.)'],
+    [`Resting HR, ${per} avg`, rhr ?? '–', d(rhr, rhrP),
+      rhr == null || rhrP == null ? 0 : band(-(rhr - rhrP), [3, 1.5, -1.5, -3]), 'Lower is better. ▲▲ ≥3 bpm below the previous period · ▲ ≥1.5 below · ● within ±1.5 · ▼ up to 3 above · ▼▼ more.'],
+    [`Sleep score, ${per} avg`, slp ?? '–', d(slp, slpP),
+      slp == null || slpP == null ? 0 : band(slp - slpP, [5, 2, -2, -5]), 'Average sleep score vs the previous period of the same length. ▲▲ ≥+5 · ▲ ≥+2 · ● within ±2 · ▼ ≥−5 · ▼▼ below.'],
+    ['VO2max', g.vo2 ?? '–', vo2Prev != null && g.vo2 != null ? `${g.vo2 - vo2Prev >= 0 ? '▲' : '▼'} ${Math.abs(r1(g.vo2 - vo2Prev))} ${sinceTxt}` : 'Garmin estimate',
+      vo2Prev == null || g.vo2 == null ? 0 : band(g.vo2 - vo2Prev, [1, 0.3, -0.3, -1]), 'Change over the range. ▲▲ ≥+1 · ▲ ≥+0.3 · ● within ±0.3 · ▼ ≥−1 · ▼▼ below.'],
   ];
   document.getElementById('tiles').innerHTML = tiles.map(([l, v, s, lvl, rule]) => {
     const [sym, cls, word] = IND[lvl ?? 0];

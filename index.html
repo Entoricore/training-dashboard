@@ -981,7 +981,7 @@ function renderEF() {
 }
 
 function renderTrainer() {
-  const T = (D.trainer || []).filter(t => t.easy && inRange(t.date));
+  const T = (D.trainer || []).filter(t => t.easy && t.min >= 10 && inRange(t.date));
   timeChart('trainer', [line('Watts at easy HR', C.s1, T.map(t => ({ x: ts(t.date), y: t.easy, t })), {
     fmt: o => [`${o.y} W at HR under 141`, `${o.t.min} min · avg ${o.t.power} W · HR ${o.t.hr} · drift ${o.t.drift}%`] })],
     { yFmt: v => v + ' W', yTicks: 5 });
